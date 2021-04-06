@@ -96,13 +96,22 @@ class DatasetHandler():
             for idx, line in enumerate(f):
                 instance = json.loads(line)
                 for target in instance['targets']:
-                    curr_sample = {'text_id': idx
-                        , 'span1': target['span1']
-                        , 'span2': target['span2']
-                        , 'text': instance['text']
-                        , 'label': np.array([target['label']])
-                                   }
-                    samples.append(curr_sample)
+                    if self.info.name != 'semeval_data':
+                        curr_sample = {'text_id': idx
+                            , 'span1': target['span1']
+                            , 'span2': target['span2']
+                            , 'text': instance['text']
+                            , 'label': np.array([target['label']])
+                                       }
+                        samples.append(curr_sample)
+                    else:
+                        curr_sample = {'text_id': instance['info']['id']
+                            , 'span1': target['span1']
+                            , 'span2': target['span2']
+                            , 'text': instance['text']
+                            , 'label': np.array([target['label']])
+                                       }
+                        samples.append(curr_sample)
 
         return pd.DataFrame.from_dict(samples)
 
