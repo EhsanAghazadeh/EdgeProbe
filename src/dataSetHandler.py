@@ -71,7 +71,7 @@ class DatasetHandler():
         data_types = ["train", "dev", "test"]
         for data_type in data_types:
             self.dataset_dict[data_type] = self.json2dataset(
-                path=root_dir_path + dataset_info.name + '/train.json',
+                path=root_dir_path + dataset_info.name + '/'+data_type+'.json',
                 frac=dataset_info.frac
             )
 
