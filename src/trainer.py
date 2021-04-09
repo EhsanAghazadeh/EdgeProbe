@@ -8,20 +8,12 @@ import matplotlib.pyplot as plt
 import gc
 
 from src.dataSetHandler import DatasetHandler
-from src.model import CorefModel
 from src.model import EPModel
 from torchvision import transforms
 from torch.utils.data import DataLoader
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
-def isCached(current, cache):
-    for cached in cache:
-        if np.array_equal(current, cached):
-            return True
-
-    return False
 
 class EPTrainer:
     def __init__(
@@ -60,6 +52,7 @@ class EPTrainer:
                 input_span_len=self.input_span_len,
                 embedding_dim=self.embedding_dim,
                 num_classes=self.num_classes,
+                num_layers=self.num_layers,
                 pool_method='max',
                 device=self.mlp_device
             )
