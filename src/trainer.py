@@ -28,7 +28,7 @@ class EPTrainer:
             model_checkpoint=None
     ):
         self.current_hidden_states = None
-        self.last_sentance_hidden_states = {
+        self.last_sentence_hidden_states = {
             'text_id': None,
             'input_ids': [],
             'hidden_states': []
@@ -320,18 +320,18 @@ class EPTrainer:
         language_model_dict = self.init_span_dict(num_spans, pad)
 
         for i in range(start_idx, end_idx):
-            if self.last_sentance_hidden_states['text_id'] != None and tokenized_dataset[
+            if self.last_sentence_hidden_states['text_id'] != None and tokenized_dataset[
                                                                        i:i + 1
-                                                                       ]['text_id'] == self.last_sentance_hidden_states[
+                                                                       ]['text_id'] == self.last_sentence_hidden_states[
                 'text_id']:
-                idx = self.last_sentance_hidden_states[
+                idx = self.last_sentence_hidden_states[
                     'input_ids'
                 ].index(
                     tokenized_dataset[i:i + 1][
                         'input_ids'
                     ][0]
                 )
-                self.current_hidden_states = self.last_sentance_hidden_states[
+                self.current_hidden_states = self.last_sentence_hidden_states[
                     'hidden_states'
                 ][idx]
             else:
@@ -353,13 +353,13 @@ class EPTrainer:
                     ])[:, 0]
 
                     if cache:
-                        self.last_sentance_hidden_states['text_id'] = text_id
-                        self.last_sentance_hidden_states['input_ids'] = sample_dict['input_ids']
-                        self.last_sentance_hidden_states['hidden_states'] = current_hidden_states
+                        self.last_sentence_hidden_states['text_id'] = text_id
+                        self.last_sentence_hidden_states['input_ids'] = sample_dict['input_ids']
+                        self.last_sentence_hidden_states['hidden_states'] = current_hidden_states
 
             row = tokenized_dataset[i]
 
-            curr_encoded = self.last_sentance_hidden_states[
+            curr_encoded = self.last_sentence_hidden_states[
                 'hidden_states'
             ]
             language_model_dict['encoded_repr'].append(
