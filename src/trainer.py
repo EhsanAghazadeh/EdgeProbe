@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+
 class EPTrainer:
     def __init__(
             self,
@@ -27,11 +28,7 @@ class EPTrainer:
             model_checkpoint=None
     ):
         self.current_hidden_states = None
-        # self.cached_hidden_states = {
-        #     'input_ids': [],
-        #     'hidden_states': []
-        # }
-        self.last_setance_hidden_states = {
+        self.last_sentance_hidden_states = {
             'text_id': None,
             'input_ids': [],
             'hidden_states': []
@@ -45,11 +42,11 @@ class EPTrainer:
         self.verbose = verbose
         self.model_checkpoint = model_checkpoint
 
-        self.num_layers, self.input_span_len, self.embedding_dim, self.num_classes = self.get_pretrained_model_properties()
+        self.num_layers, self.input_span_len, self.embedding_dim, self.num_classes, max_span_len = self.get_pretrained_model_properties()
         self.mlp_device = "cuda"
         if self.model_checkpoint == None:
             self.model = EPModel(
-                input_span_len=self.input_span_len,
+                max_span_len=max_span_len,
                 embedding_dim=self.embedding_dim,
                 num_classes=self.num_classes,
                 num_layers=self.num_layers,
@@ -71,12 +68,17 @@ class EPTrainer:
         self.model.to(self.mlp_device)
         dataset_len = len(train_tokenized_dataset['input_ids'])
 
+        # print('happy')
+
         self.loss_hist['train'].append(
             self.calc_loss(
                 tokenized_dataset=train_tokenized_dataset,
                 print_metrics=True
             )
         )
+
+        # print('happy')
+
         self.loss_hist['test'].append(
             self.calc_loss(
                 tokenized_dataset=test_tokenized_dataset,
@@ -100,12 +102,14 @@ class EPTrainer:
                 if i + step > dataset_len:
                     step = dataset_len - i
 
-                spans = self.prepare_batch_data(
+                spans, max_span_len = self.prepare_batch_data(
                     tokenized_dataset=train_tokenized_dataset,
                     start_idx=i,
                     end_idx=i + step,
                     pad=True
                 )
+
+                self.model.max_span_len = max_span_len
 
                 labels = spans['one_hot_labels']
 
@@ -143,13 +147,6 @@ class EPTrainer:
             print('[%d] loss: %.4f, val_loss: %.4f, test_loss: %.4f' % (
                 epoch + 1, self.loss_hist["train"][-1], self.loss_hist["dev"][-1], self.loss_hist["test"][-1]))
 
-            # self.cached_hidden_states = {
-            #     'input_ids': [],
-            #     'hidden_states': []
-            # }
-
-            gc.collect()
-
     def draw_weights(self):
         weights = self.model.weights.tolist()
         plt.bar(
@@ -177,7 +174,7 @@ class EPTrainer:
                 if i + batch_size > dataset_len:
                     step = dataset_len - i
 
-                spans_dict = self.prepare_batch_data(
+                spans_dict, max_span_len = self.prepare_batch_data(
                     tokenized_dataset=tokenized_dataset,
                     start_idx=i,
                     end_idx=i + step,
@@ -225,32 +222,36 @@ class EPTrainer:
             end_idx,
             pad=False
     ):
-        span_rerps_dict = self.extract_embeddings_from_pretrained_model(
+        max_sent_len = max(
+            tokenized_dataset[start_idx:end_idx]['sent_len']
+        )
+
+        span_rerps_dict, max_span_len = self.extract_embeddings_from_pretrained_model(
             tokenized_dataset=tokenized_dataset,
             start_idx=start_idx,
             end_idx=end_idx,
-            pad=pad
+            pad=pad,
+            max_sent_len=max_sent_len
         )
 
-        span1 = torch.tensor(
-            np.asarray(span_rerps_dict['span1_reprs'])
+        encoded_repr = torch.tensor(
+            np.asarray(span_rerps_dict['encoded_repr'])
         ).float().to(self.mlp_device)
-        span2 = torch.tensor(
-            np.asarray(span_rerps_dict['span2_reprs'])
+
+        span1_start_ids = torch.tensor(
+            np.asarray(span_rerps_dict['span1_start_ids'])
         ).float().to(self.mlp_device)
-        span1_attention_mask = torch.tensor(
-            np.asarray(
-                span_rerps_dict[
-                    'span1_attention_mask'
-                ]
-            )
+
+        span1_end_ids = torch.tensor(
+            np.asarray(span_rerps_dict['span1_end_ids'])
         ).float().to(self.mlp_device)
-        span2_attention_mask = torch.tensor(
-            np.asarray(
-                span_rerps_dict[
-                    'span2_attention_mask'
-                ]
-            )
+
+        span2_start_ids = torch.tensor(
+            np.asarray(span_rerps_dict['span2_start_ids'])
+        ).float().to(self.mlp_device)
+
+        span2_end_ids = torch.tensor(
+            np.asarray(span_rerps_dict['span2_end_ids'])
         ).float().to(self.mlp_device)
 
         one_hot_labels = torch.tensor(
@@ -260,38 +261,45 @@ class EPTrainer:
         ).float().to(self.mlp_device)
 
         return {
-            'span1': span1,
-            'span2': span2,
-            'span1_attention_mask': span1_attention_mask,
-            'span2_attention_mask': span2_attention_mask,
-            'one_hot_labels': one_hot_labels
-        }
+                   'encoded_repr': encoded_repr,
+                   'span1_start_ids': span1_start_ids,
+                   'span1_end_ids': span1_end_ids,
+                   'span2_start_ids': span2_start_ids,
+                   'span2_end_ids': span2_end_ids,
+                   'one_hot_labels': one_hot_labels
+               }, max_span_len
 
     def get_pretrained_model_properties(self):
-        span_reprs_dict = self.extract_embeddings_from_pretrained_model(
+
+        max_sent_len = max(
+            self.dataset_handler.tokenized_dataset['train'][0:3]['sent_len']
+        )
+        span_reprs_dict, max_span_len = self.extract_embeddings_from_pretrained_model(
             self.dataset_handler.tokenized_dataset['train'],
             0,
             3,
+            max_sent_len=max_sent_len,
             pad=True,
             cache=True
         )
-        for val in span_reprs_dict['span1_reprs']:
-            print(f"span1 shape: {val.shape}")
-        span_reps_sample = span_reprs_dict['span1_reprs'][0]
+
+        for val in span_reprs_dict['encoded_repr']:
+            print(
+                f"Pretrained language model embeddings shape: {val.shape}"
+            )
+        span_reps_sample = span_reprs_dict['encoded_repr'][0]
         assert len(span_reps_sample.shape) == 3
         num_layers = span_reps_sample.shape[0]
         span_len = span_reps_sample.shape[1]
         embedding_dim = span_reps_sample.shape[2]
-        if self.verbose:
-            display(pd.DataFrame(span_reprs_dict).head(4))
-
-        return num_layers, span_len, embedding_dim, len(self.dataset_handler.unique_labels_list)
+        return num_layers, span_len, embedding_dim, len(self.dataset_handler.unique_labels_list), max_span_len
 
     def extract_embeddings_from_pretrained_model(
             self,
             tokenized_dataset,
             start_idx,
             end_idx,
+            max_sent_len,
             pad=True,
             cache=True
     ):
@@ -309,25 +317,26 @@ class EPTrainer:
         )
 
         num_spans = self.dataset_handler.info.num_spans
-        span_repr = self.init_span_dict(num_spans, pad)
+        language_model_dict = self.init_span_dict(num_spans, pad)
 
         for i in range(start_idx, end_idx):
-            if self.last_setance_hidden_states['text_id'] != None and tokenized_dataset[
-                                                                      i:i + 1
-            ]['text_id']==self.last_setance_hidden_states['text_id']:
-                idx = self.last_setance_hidden_states[
+            if self.last_sentance_hidden_states['text_id'] != None and tokenized_dataset[
+                                                                       i:i + 1
+                                                                       ]['text_id'] == self.last_sentance_hidden_states[
+                'text_id']:
+                idx = self.last_sentance_hidden_states[
                     'input_ids'
                 ].index(
-                    tokenized_dataset[i:i+1][
+                    tokenized_dataset[i:i + 1][
                         'input_ids'
                     ][0]
                 )
-                self.current_hidden_states = self.last_setance_hidden_states[
+                self.current_hidden_states = self.last_sentance_hidden_states[
                     'hidden_states'
                 ][idx]
             else:
                 with torch.no_grad():
-                    sample_dict = tokenized_dataset[i:i+1]
+                    sample_dict = tokenized_dataset[i:i + 1]
                     # print(sample_dict)
                     text_id = sample_dict['text_id']
                     # print(f"text id is: {text_id}")
@@ -344,81 +353,69 @@ class EPTrainer:
                     ])[:, 0]
 
                     if cache:
-                        self.last_setance_hidden_states['text_id'] = text_id
-                        self.last_setance_hidden_states['input_ids'] = sample_dict['input_ids']
-                        self.last_setance_hidden_states['hidden_states'] = current_hidden_states
-
+                        self.last_sentance_hidden_states['text_id'] = text_id
+                        self.last_sentance_hidden_states['input_ids'] = sample_dict['input_ids']
+                        self.last_sentance_hidden_states['hidden_states'] = current_hidden_states
 
             row = tokenized_dataset[i]
 
-            span1_hidden_states = self.last_setance_hidden_states['hidden_states'][
-                                  :, row['span1_indices'], :
-                                  ]
-            if pad:
-                curr_padded_span_repr, curr_attention_mask = self.pad_span(
-                    span1_hidden_states,
-                    max_span_len
+            curr_encoded = self.last_sentance_hidden_states[
+                'hidden_states'
+            ]
+            language_model_dict['encoded_repr'].append(
+                np.concatenate(
+                    [
+                        curr_encoded,
+                        np.zeros((
+                            curr_encoded.shape[0],
+                            max_sent_len - curr_encoded.shape[1],
+                            curr_encoded.shape[2]
+                        ))
+                    ],
+                    axis=1
                 )
-                span_repr['span1_reprs'].append(
-                    curr_padded_span_repr
-                )
-                span_repr['span1_attention_mask'].append(
-                    curr_attention_mask
-                )
-            else:
-                span_repr['span1_reprs'].append(
-                    span1_hidden_states
-                )
+            )
 
-            if num_spans == 2:
-                span2_hidden_states = self.last_setance_hidden_states['hidden_states'][
-                                      :, row['span2_indices'], :
-                                      ]
-                if pad:
-                    curr_padded_span_repr, curr_attention_mask = self.pad_span(
-                        np.array(span2_hidden_states),
-                        max_span_len
-                    )
-                    span_repr['span2_reprs'].append(
-                        curr_padded_span_repr
-                    )
-                    span_repr['span2_attention_mask'].append(
-                        curr_attention_mask
-                    )
-                else:
-                    span_repr['span2_reprs'].append(
-                        span2_hidden_states
-                    )
+            language_model_dict['span1_start_ids'].append(row[
+                                                              'span1_indices'
+                                                          ][0])
 
-            span_repr['one_hot_label'].append(
+            language_model_dict['span1_end_ids'].append(row[
+                                                            'span1_indices'
+                                                        ][-1])
+
+            language_model_dict['one_hot_label'].append(
                 row['one_hot_label']
             )
-            span_repr['label'].append(
+            language_model_dict['label'].append(
                 row['label']
             )
 
-        return span_repr
+            if num_spans == 2:
+                language_model_dict['span2_start_ids'].append(row[
+                                                                  'span2_indices'
+                                                              ][0])
 
-    def init_span_dict(self, num_spans, pad):
+                language_model_dict['span2_end_ids'].append(row[
+                                                                'span2_indices'
+                                                            ][-1])
+
+        return language_model_dict, max_span_len
+
+    @staticmethod
+    def init_span_dict(num_spans, pad):
+        language_model_dict = {
+            'encoded_repr': [],
+            'label': [],
+            'one_hot_label': [],
+            'span1_start_ids': [],
+            'span1_end_ids': []
+        }
         if num_spans == 2:
-            span_repr = {
-                'span1_reprs': [],
-                'span2_reprs': [],
-                'label': [],
-                'one_hot_label': []
-            }
-        else:
-            span_repr = {
-                'span1_reprs': [],
-                'label': [],
-                'one_hot_label': []
-            }
+            language_model_dict['span2_start_ids'] = []
+            language_model_dict['span2_end_ids'] = []
 
-        if pad:
-            span_repr['span1_attention_mask'] = []
-            span_repr['span2_attention_mask'] = []
-
-        return span_repr
+        return language_model_dict
 
     @staticmethod
     def pad_span(
@@ -426,11 +423,8 @@ class EPTrainer:
             span_max_len
     ):
         num_layers = span_repr.shape[0]
-        # print("number of layers: {}".format(num_layers))
-        # print("span shape is: {}".format(span_repr.shape))
         span_len = span_repr.shape[1]
         embedding_dim = span_repr.shape[2]
-        # padded_span_repr = np.zeros((num_layers, span_max_len, embedding_dim))
         if span_len > span_max_len:
             raise Exception(
                 f"Error: {span_len} is more than span_max_len{span_max_len}"

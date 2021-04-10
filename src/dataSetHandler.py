@@ -33,6 +33,8 @@ def tokenize_and_one_hot(sample, **fn_kwargs):
         label2index,
         sample["label"]
     ), labels_len)
+    tokenized_input['sent_len'] = len(tokenized_input['input_ids'])
+
     return tokenized_input
 
 
